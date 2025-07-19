@@ -1,5 +1,5 @@
-function processEmail(processType='draftCombined') {
-  const sheetName = "EmailApp"
+function processEmail(processType='draftSeparateNew') {
+  const sheetName = "MailApp"
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   const data = sheet.getDataRange().getValues();
 
@@ -12,18 +12,26 @@ function processEmail(processType='draftCombined') {
 
   // Template for email subject and body
   var mailBody = prepareBody(mail_salutation, mail_body_para1, mail_body_para2, mail_body_para3, post_script)
-  if (processType == 'draftSeparate')
-    separateEmails(data, mail_subject, mailBody, false, true);
-  else if (processType == 'sendSeparate')
-    separateEmails(data, mail_subject, mailBody, true, false);
-  else if (processType == 'draftCombined')
-    combinedEmails(data, mail_subject, mailBody, false, true);
-  else if (processType == 'sendCombined')
-    combinedEmails(data, mail_subject, mailBody, true, false);
+  if (processType == 'draftSeparateNew')
+    separateNewEmails(data, mail_subject, mailBody, sendMailFlag=false, draftMailFlag=true);
+  else if (processType == 'sendSeparateNew')
+    separateNewEmails(data, mail_subject, mailBody, sendMailFlag=true, draftMailFlag=false);
+  else if (processType == 'draftCombinedNew')
+    combinedNewEmails(data, mail_subject, mailBody, sendMailFlag=false, draftMailFlag=true);
+  else if (processType == 'sendCombinedNew')
+    combinedNewEmails(data, mail_subject, mailBody, sendMailFlag=true, draftMailFlag=false);
+  else if (processType == 'draftSeparateForward')
+    separateForwardEmails(data, mail_subject, mailBody, sendMailFlag=false, draftMailFlag=true)
+  else if (processType == 'sendSeparateForward')
+    separateForwardEmails(data, mail_subject, mailBody, sendMailFlag=true, draftMailFlag=false)
+  else if (processType == 'draftCombinedForward')
+    combinedForwardEmails(data, mail_subject, mailBody, sendMailFlag=false, draftMailFlag=true)
+  else if (processType == 'sendCombinedForward')
+    combinedForwardEmails(data, mail_subject, mailBody, sendMailFlag=true, draftMailFlag=false)
 }
 
-// For Combined Mails
-function combinedEmails(data, mail_subject, mailBody, sendMailFlag=false, draftMailFlag=false){
+// For Combined New Mails
+function combinedNewEmails(data, mail_subject, mailBody, sendMailFlag=false, draftMailFlag=false){
   var emailList = [];
   var flatsConsidered = []
   for (let i = 1; i < data.length; i++) {
@@ -60,10 +68,10 @@ function combinedEmails(data, mail_subject, mailBody, sendMailFlag=false, draftM
   }    
 }
 
-// For Separate Mails
-function separateEmails(data, mail_subject, mailBody, sendMailFlag=false, draftMailFlag=false){
-  const variablesToReplace = {};
+// For Separate New Mails
+function separateNewEmails(data, mail_subject, mailBody, sendMailFlag=false, draftMailFlag=false){
   for (let i = 1; i < data.length; i++) {
+    const variablesToReplace = {};
     variablesToReplace["{{FlatNo}}"] = data[i][0];
     variablesToReplace["{{OwnerNames}}"] = data[i][1];
     var emailList = [];
@@ -103,6 +111,107 @@ function separateEmails(data, mail_subject, mailBody, sendMailFlag=false, draftM
       }
     }
   }
+}
+
+// For Combined Forward Mails
+function combinedForwardEmails(data, mail_subject, mailBody, sendMailFlag = false, draftMailFlag = false) {
+  var threads = GmailApp.search('subject:"' + mail_subject + '"');
+
+  if (threads.length > 0) {
+    var latestThread = threads[0];
+    var messages = latestThread.getMessages();
+    var latestMessage = messages[messages.length - 1];
+
+    // Attach Signature
+    body = mailBody + getSignature()
+    var originalBody = latestMessage.getBody();
+    var combinedBody = body + originalBody;
+    var draftSubject = "Fwd: " + mail_subject;
+
+    // Get Emails
+    var emailList = [];
+    var flatsConsidered = []
+    for (let i = 1; i < data.length; i++) {
+      const flatNo = data[i][0]
+      const sendmail = data[i][4];
+      if (sendmail.toLowerCase() == "yes" && (data[i][2] || data[i][3])) {
+        if (data[i][2])
+          emailList.push(data[i][2]) // email1
+        if (data[i][2])
+          emailList.push(data[i][3]); // email2
+
+        flatsConsidered.push(flatNo) // add flat
+      }
+    }
+    if (emailList.length > 0) {
+      var recipients = emailList.join(",");
+      if (draftMailFlag) {
+        GmailApp.createDraft(recipients, draftSubject, "",{ htmlBody: combinedBody });
+        Logger.log("Mail drafted for " + (flatsConsidered.length) + " members. [" + flatsConsidered.join(",") + "]");
+      }
+      else if (sendMailFlag) {
+        //GmailApp.sendEmail(recipient, draftSubject, "",{ htmlBody: combinedBody});
+        Logger.log("Mail sent to " + (flatsConsidered.length) + " members. [" + flatsConsidered.join(",") + "]");
+      }
+    }
+  } else {
+    Logger.log("No email found with the given subject.");
+  }
+}
+
+// For Separate Forward Mails
+function separateForwardEmails(data, mail_subject, mailBody, sendMailFlag=false, draftMailFlag=false) {
+  const variablesToReplace = {};
+  for (let i = 1; i < data.length; i++) {
+    variablesToReplace["{{FlatNo}}"] = data[i][0];
+    variablesToReplace["{{OwnerNames}}"] = data[i][1];
+    var emailList = [];
+    if (data[i][2])
+      emailList.push(data[i][2]) // email1
+    if (data[i][2])
+      emailList.push(data[i][3]); // email2
+
+    const sendmail = data[i][4];
+    var msgToLog = "{{OwnerNames}}, Flat no. {{FlatNo}}";
+    if (sendmail.toLowerCase() == "yes") {
+      // Replace placeholders in subject and body
+      var subject = mail_subject;
+      var body = mailBody;
+      for (var variable in variablesToReplace) {
+
+        subject = subject.replaceAll(variable, variablesToReplace[variable]);
+        body = body.replaceAll(variable, variablesToReplace[variable]);
+        msgToLog = msgToLog.replaceAll(variable, variablesToReplace[variable]);
+      }
+      var threads = GmailApp.search('subject:"' + subject + '"');
+      if (threads.length > 0) {
+        var latestThread = threads[0];
+        var messages = latestThread.getMessages();
+        var latestMessage = messages[messages.length - 1];
+
+        // Combine custom message with the original
+        var originalBody = latestMessage.getBody();
+        var combinedBody = body + getSignature() + originalBody;
+        var draftSubject = "Fwd: " + subject;
+        
+        // Create draft (use 'to' to populate the draft email address field)
+        if (emailList.length > 0) {
+          var recipients = emailList.join(",");  // Convert array to comma-separated string
+          if (draftMailFlag) {
+            GmailApp.createDraft(recipients, draftSubject, "", { htmlBody: combinedBody });
+            Logger.log("Mail drafted for " + msgToLog);
+          }
+          if (sendMailFlag) {
+            //GmailApp.sendEmail(recipients, draftSubject, "", { htmlBody: combinedBody }); // IMPORTANT !! Be cautious while uncommenting. It will send mail to recipients
+            Logger.log("Mail sent to " + msgToLog);
+          }
+        }
+      }
+      else {
+        Logger.log("No email found with the given subject for "+msgToLog);
+      }      
+    }    
+  }  
 }
 
 function getSignature(){
