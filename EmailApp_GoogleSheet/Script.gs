@@ -1,4 +1,4 @@
-function processEmail(processType='draftSeparateNew') {
+function processEmail(processType='draftCombinedNew') {
   const sheetName = "MailApp"
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
   const data = sheet.getDataRange().getValues();
@@ -9,7 +9,7 @@ function processEmail(processType='draftSeparateNew') {
   const mail_body_para2 = sheet.getRange("H5").getValue();
   const mail_body_para3 = sheet.getRange("H6").getValue();
   const post_script = sheet.getRange("H7").getValue();
-
+  
   // Template for email subject and body
   var mailBody = prepareBody(mail_salutation, mail_body_para1, mail_body_para2, mail_body_para3, post_script)
   if (processType == 'draftSeparateNew')
@@ -33,14 +33,14 @@ function processEmail(processType='draftSeparateNew') {
 // For Combined New Mails
 function combinedNewEmails(data, mail_subject, mailBody, sendMailFlag=false, draftMailFlag=false){
   var emailList = [];
-  var flatsConsidered = []
+  var flatsConsidered = [];
   for (let i = 1; i < data.length; i++) {
     const flatNo = data[i][0]    
     const sendmail = data[i][4];
     if (sendmail.toLowerCase() == "yes" && (data[i][2] || data[i][3])){        
       if (data[i][2])
         emailList.push(data[i][2]) // email1
-      if (data[i][2])
+      if (data[i][3])
         emailList.push(data[i][3]); // email2
       
       flatsConsidered.push(flatNo) // add flat
@@ -51,20 +51,26 @@ function combinedNewEmails(data, mail_subject, mailBody, sendMailFlag=false, dra
   var body = mailBody;
 
   // Attach Signature
-  body = body+getSignature()
+  body = body+getSignature();
   
+  var uniqueEmailSet = new Set(emailList); // take unique list
+  emailList = Array.from(uniqueEmailSet)
   // Create draft (use 'to' to populate the draft email address field)
   if (emailList.length > 0)
   {
-      var recipients = emailList.join(",");  // Convert array to comma-separated string
-      if (draftMailFlag){
-        GmailApp.createDraft(recipients, subject, "", { htmlBody: body });
-        Logger.log("Mail drafted for "+(flatsConsidered.length)+" members. ["+flatsConsidered.join(",")+"]");
-      }
-      if (sendMailFlag){
-        //GmailApp.sendEmail(recipients, subject, "", { htmlBody: body }); // IMPORTANT !! Be cautious while uncommenting. It will send mail to recipients
-        Logger.log("Mail sent to "+(flatsConsidered.length)+" members. ["+flatsConsidered.join(",")+"]");
-      }
+      var msg = "";
+      recipientBatches = splitEmailsIntoBatches(emailList)  ;    
+      recipientBatches.forEach((recipientBatch, index) => {
+        if (draftMailFlag){
+          GmailApp.createDraft(recipientBatch.join(","), subject, "", { htmlBody: body });
+          msg = "Mail drafted for "+(emailList.length)+" emails (flats:"+flatsConsidered.length+") in "+recipientBatches.length+" batches. ["+flatsConsidered.join(",")+"]";
+        }
+        if (sendMailFlag){
+          //GmailApp.sendEmail(recipientBatch.join(","), subject, "", { htmlBody: body }); // IMPORTANT !! Be cautious while uncommenting. It will send mail to recipients
+          msg = "Mail sent to "+(emailList.length)+" emails (flats:"+flatsConsidered.length+") in "+recipientBatches.length+" batches. ["+flatsConsidered.join(",")+"]"          
+        }
+      });      
+      Logger.log(msg)
   }    
 }
 
@@ -102,7 +108,7 @@ function separateNewEmails(data, mail_subject, mailBody, sendMailFlag=false, dra
           var recipients = emailList.join(",");  // Convert array to comma-separated string
           if (draftMailFlag){
             GmailApp.createDraft(recipients, subject, "", { htmlBody: body });
-            Logger.log("Mail drafted for "+msgToLog);
+            Logger.log("Mail drafted for "+msgToLog);            
           }
           if (sendMailFlag){
             //GmailApp.sendEmail(recipients, subject, "", { htmlBody: body }); // IMPORTANT !! Be cautious while uncommenting. It will send mail to recipients
@@ -130,7 +136,7 @@ function combinedForwardEmails(data, mail_subject, mailBody, sendMailFlag = fals
 
     // Get Emails
     var emailList = [];
-    var flatsConsidered = []
+    var flatsConsidered = [];
     for (let i = 1; i < data.length; i++) {
       const flatNo = data[i][0]
       const sendmail = data[i][4];
@@ -143,16 +149,22 @@ function combinedForwardEmails(data, mail_subject, mailBody, sendMailFlag = fals
         flatsConsidered.push(flatNo) // add flat
       }
     }
+    var uniqueEmailSet = new Set(emailList); // take unique list
+    emailList = Array.from(uniqueEmailSet)
     if (emailList.length > 0) {
-      var recipients = emailList.join(",");
-      if (draftMailFlag) {
-        GmailApp.createDraft(recipients, draftSubject, "",{ htmlBody: combinedBody });
-        Logger.log("Mail drafted for " + (flatsConsidered.length) + " members. [" + flatsConsidered.join(",") + "]");
-      }
-      else if (sendMailFlag) {
-        //GmailApp.sendEmail(recipient, draftSubject, "",{ htmlBody: combinedBody});
-        Logger.log("Mail sent to " + (flatsConsidered.length) + " members. [" + flatsConsidered.join(",") + "]");
-      }
+      var msg = "";
+      recipientBatches = splitEmailsIntoBatches(emailList);
+      recipientBatches.forEach((recipientBatch, index) => {
+        if (draftMailFlag) {
+          GmailApp.createDraft(recipientBatch.join(","), draftSubject, "",{ htmlBody: combinedBody });
+          msg = "Mail drafted for "+(emailList.length)+" email ids (flats:"+flatsConsidered.length+") in "+recipientBatches.length+" batches. ["+flatsConsidered.join(",")+"]";
+        }
+        else if (sendMailFlag) {
+          //GmailApp.sendEmail(recipientBatch.join(","), draftSubject, "",{ htmlBody: combinedBody});
+          msg = "Mail sent to "+(emailList.length)+" email ids (flats:"+flatsConsidered.length+") in "+recipientBatches.length+" batches. ["+flatsConsidered.join(",")+"]"          
+        }
+      });      
+      Logger.log(msg)
     }
   } else {
     Logger.log("No email found with the given subject.");
@@ -246,4 +258,15 @@ function prepareBody(mail_salutation, mail_body_para1, mail_body_para2, mail_bod
   ;
 
   return htmlBodyTemplate;
+}
+
+function splitEmailsIntoBatches(emailList) {
+  const batchSize = 50; // Set your desired batch size
+  const batches = [];
+  
+  for (let i = 0; i < emailList.length; i += batchSize) {
+    const batch = emailList.slice(i, i + batchSize);
+    batches.push(batch);
+  }
+  return batches;
 }
